@@ -212,6 +212,18 @@
         <button class="btn secondary" id="addPaymentBtn" type="button">추가</button>
       </div>
       <div class="list" id="paymentManageList"></div>
+
+      <label>엑셀 내역 붙여넣기</label>
+      <div class="note">엑셀에서 <strong>날짜, 구분, 카테고리, 내용, 금액, 결제수단</strong> 6개 열을 복사해서 그대로 붙여넣으세요. 탭(엑셀 복사), 세로막대(|), 쉼표(,) 형식을 모두 지원합니다.</div>
+      <textarea id="pasteImportInput" style="width:100%;min-height:160px;border:1px solid var(--line);border-radius:16px;padding:14px;font-size:14px;margin-top:10px" placeholder="예:
+2026-03-01	지출	식비	점심	12000	카드(비씨)
+2026-03-02	수입	급여	월급	2500000	현금"></textarea>
+      <div class="actions">
+        <button class="btn secondary" id="sampleFillBtn" type="button">예시 넣기</button>
+        <button class="btn" id="pasteImportBtn" type="button">붙여넣기 가져오기</button>
+      </div>
+      <div class="footer-mini">가져오기 전에 카테고리나 결제수단이 없으면 자동으로 목록에 추가됩니다. 같은 줄을 다시 가져오면 중복될 수 있으니 한 번만 실행하세요.</div>
+
       <div class="actions">
         <button class="btn secondary" id="exportBtn">백업 내보내기</button>
         <label class="btn secondary center" for="importFile">백업 불러오기</label>
@@ -582,6 +594,69 @@
   function openModal(id){ $('#' + id).classList.add('show'); }
   function closeModal(id){ $('#' + id).classList.remove('show'); }
 
+  function splitImportedRow(row) {
+    if (row.includes('	')) return row.split('	');
+    if (row.includes('|')) return row.split('|');
+    return row.split(',');
+  }
+
+  function normalizeDate(value) {
+    const s = String(value || '').trim().replace(/[./]/g, '-');
+    const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (!m) return s;
+    return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+  }
+
+  function importPastedRows(raw) {
+    const lines = String(raw || '').split(/
+?
+/).map(v => v.trim()).filter(Boolean);
+    if (!lines.length) {
+      alert('붙여넣은 내용이 없어요.');
+      return;
+    }
+    let imported = 0;
+    const errors = [];
+    lines.forEach((line, idx) => {
+      const cols = splitImportedRow(line).map(v => String(v).trim());
+      if (cols.length < 6) {
+        errors.push(`${idx + 1}행`);
+        return;
+      }
+      const [dateRaw, typeRaw, categoryRaw, memoRaw, amountRaw, paymentRaw] = cols;
+      const date = normalizeDate(dateRaw);
+      const type = typeRaw || '지출';
+      const category = categoryRaw || '기타';
+      const memo = memoRaw || '';
+      const amount = Number(String(amountRaw).replace(/,/g,'').replace(/[^\d.-]/g,''));
+      const payment = paymentRaw || '현금';
+      if (!date || !memo || !Number.isFinite(amount)) {
+        errors.push(`${idx + 1}행`);
+        return;
+      }
+      if (!state.categories.includes(category)) state.categories.push(category);
+      if (!state.paymentMethods.includes(payment)) state.paymentMethods.push(payment);
+      state.expenses.unshift({
+        id: 'e-' + Date.now() + '-' + idx,
+        date,
+        type,
+        category,
+        memo,
+        amount,
+        payment
+      });
+      if (payment === '현금') state.cashBalance += type === '수입' ? amount : -amount;
+      if (payment === '울산페이' && type === '지출') state.ulsanPayBalance -= amount;
+      imported += 1;
+    });
+    save();
+    renderAll();
+    const msg = errors.length
+      ? `${imported}건 가져왔고, ${errors.join(', ')}은 형식을 확인해주세요.`
+      : `${imported}건 가져왔어요.`;
+    alert(msg);
+  }
+
   function bindEvents() {
     $$('.tabbtn').forEach(btn => btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
@@ -697,6 +772,16 @@
     $('#budgetInput').addEventListener('input', () => {
       state.budget = Number(String($('#budgetInput').value).replace(/[^\d]/g,'')) || 0;
       renderAll();
+    });
+
+    $('#sampleFillBtn').addEventListener('click', () => {
+      $('#pasteImportInput').value = `2026-03-01	지출	식비	점심	12000	카드(비씨)
+2026-03-02	수입	급여	월급	2500000	현금`;
+    });
+
+    $('#pasteImportBtn').addEventListener('click', () => {
+      importPastedRows($('#pasteImportInput').value);
+      $('#pasteImportInput').value = '';
     });
 
     $('#exportBtn').addEventListener('click', () => {
